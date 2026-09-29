@@ -4,14 +4,26 @@ A two-row status line for [Claude Code](https://docs.claude.com/en/docs/claude-c
 It replaces the default single line with a per-session token and cost breakdown,
 read straight from the transcript on disk.
 
-```
-src (main) | Opus 4.8 | ████████░░ 80%
-$28.85 run · ~$811 total | haiku+opus | in 880k · out 4.9M · in cache 15.0M · out cache 1.1B · total 1.1B | 9a5e80ae
-```
+![cc-statusline under a Claude Code prompt: row 1 shows the treehouse slot, directory, branch, model and context bar; row 2 shows cost, models, token breakdown and session id](docs/hero.webp)
 
 Row 1 is the usual directory, git branch, model, and context-window bar. Row 2 is
 the new part: cost, the models actually used (main thread plus subagents), the
 token breakdown, and the session id.
+
+## Treehouse
+
+When you run several agents in parallel from a `treehouse` worktree pool, row 1
+starts with the worktree the session runs in:
+
+![Three Claude Code sessions side by side: the main checkout shows 🏡 main (+2), the pool slots show 🏡 1/2 and 🏡 2/2](docs/treehouse.webp)
+
+- `🏡 1/3`: pool slot 1, with 3 slots of this repo's pool in use.
+- `🏡 main (+3)`: the original checkout, with 3 pool slots in use.
+- Nothing when the repo has no pool or no slot is in use.
+
+The pool is found once per directory from the layout on disk. The in-use count is
+read from the pool's `treehouse-state.json` on every render, so it adds no process
+call.
 
 ## Why
 
