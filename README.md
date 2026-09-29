@@ -9,7 +9,9 @@ src (main) | Opus 4.8 | ████████░░ 80%
 $28.85 run · ~$811 total | haiku+opus | in 880k · out 4.9M · in cache 15.0M · out cache 1.1B · total 1.1B | 9a5e80ae
 ```
 
-Row 1 is the usual directory, git branch, model, and context-window bar. Row 2 is
+Row 1 is the usual directory, git branch, model, and context-window bar. Inside a
+treehouse pool it starts with `🏡 1/3`: the current slot and how many slots of
+this repo's pool are in use. The original checkout shows `🏡 main (+3)`. Row 2 is
 the new part: cost, the models actually used (main thread plus subagents), the
 token breakdown, and the session id.
 

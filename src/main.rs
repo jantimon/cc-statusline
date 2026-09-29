@@ -412,13 +412,134 @@ fn cache_path_for(stem: &str) -> PathBuf {
     dir.join(format!("{stem}.json"))
 }
 
-fn write_cache_atomic(path: &Path, cache: &Cache) {
+fn write_cache_atomic<T: Serialize>(path: &Path, cache: &T) {
     let Ok(bytes) = serde_json::to_vec(cache) else {
         return;
     };
     let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
     if fs::write(&tmp, &bytes).is_ok() {
         let _ = fs::rename(&tmp, path);
+    }
+}
+
+// ---------- treehouse ----------
+
+const TREEHOUSE_STATE: &str = "treehouse-state.json";
+
+#[derive(Serialize, Deserialize, Clone)]
+struct PoolRef {
+    pool: PathBuf,
+    /// Slot name (`1`) or `main` for the checkout the pool was made from.
+    label: String,
+}
+
+#[derive(Deserialize)]
+struct PoolState {
+    #[serde(default)]
+    worktrees: Vec<PoolSlot>,
+}
+
+#[derive(Deserialize)]
+struct PoolSlot {
+    #[serde(default)]
+    owner_pid: Option<i32>,
+    #[serde(default)]
+    lease_id: String,
+}
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+fn pid_alive(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    pid > 0 && unsafe { kill(pid, 0) } == 0
+}
+
+/// Pools live at `<root>/<repo>-<hash>/<slot>/<repo>` with the state file in
+/// `<root>/<repo>-<hash>`, whatever `root` is configured to.
+fn pool_for(dir: &Path) -> Option<PoolRef> {
+    for a in dir.ancestors() {
+        let (Some(slot), Some(pool)) = (a.parent(), a.parent().and_then(Path::parent)) else {
+            break;
+        };
+        if pool.join(TREEHOUSE_STATE).is_file() {
+            return Some(PoolRef {
+                pool: pool.to_path_buf(),
+                label: slot.file_name()?.to_string_lossy().to_string(),
+            });
+        }
+    }
+
+    // Main checkout: its linked worktrees point into the pool.
+    let git_dir = dir
+        .ancestors()
+        .map(|a| a.join(".git"))
+        .find(|g| g.is_dir())?;
+    for e in fs::read_dir(git_dir.join("worktrees")).ok()?.flatten() {
+        let Ok(gitdir) = fs::read_to_string(e.path().join("gitdir")) else {
+            continue;
+        };
+        if let Some(pool) = Path::new(gitdir.trim())
+            .ancestors()
+            .find(|a| a.join(TREEHOUSE_STATE).is_file())
+        {
+            return Some(PoolRef {
+                pool: pool.to_path_buf(),
+                label: "main".to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// Pool lookup cached per dir (a miss too) so each dir is resolved once.
+fn cached_pool_for(dir: &str) -> Option<PoolRef> {
+    if dir.is_empty() {
+        return None;
+    }
+    let path = home()
+        .join(".claude")
+        .join("statusline-cache")
+        .join("treehouse.json");
+    let mut cache: HashMap<String, Option<PoolRef>> = fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    if let Some(hit) = cache.get(dir) {
+        return hit.clone();
+    }
+    let found = pool_for(Path::new(dir));
+    cache.insert(dir.to_string(), found.clone());
+    let _ = fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
+    write_cache_atomic(&path, &cache);
+    found
+}
+
+/// `🏡 1/3` in slot 1 with 3 slots of this pool in use, `🏡 main (+3)` in the
+/// main checkout. Empty when no slot is in use.
+fn treehouse_field(dir: &str) -> String {
+    let Some(r) = cached_pool_for(dir) else {
+        return String::new();
+    };
+    let Some(state) = fs::read(r.pool.join(TREEHOUSE_STATE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<PoolState>(&b).ok())
+    else {
+        return String::new();
+    };
+    let in_use = state
+        .worktrees
+        .iter()
+        .filter(|w| !w.lease_id.is_empty() || w.owner_pid.is_some_and(pid_alive))
+        .count();
+    if in_use == 0 {
+        return String::new();
+    }
+    if r.label == "main" {
+        format!("{LABEL}🏡 main (+{in_use}){RESET}")
+    } else {
+        format!("{LABEL}🏡 {}/{in_use}{RESET}", r.label)
     }
 }
 
@@ -550,6 +671,10 @@ fn build_row1(p: &Payload) -> String {
     let mut left = parts.join(" ");
     if !left.is_empty() {
         left.push_str(" | ");
+    }
+    let treehouse = treehouse_field(current);
+    if !treehouse.is_empty() {
+        left = format!("{treehouse} | {left}");
     }
 
     let model = &p.model.display_name;
