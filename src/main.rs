@@ -431,6 +431,8 @@ struct PoolRef {
     pool: PathBuf,
     /// Slot name (`1`) or `main` for the checkout the pool was made from.
     label: String,
+    /// Checkout root the label links to.
+    worktree: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -467,6 +469,7 @@ fn pool_for(dir: &Path) -> Option<PoolRef> {
             return Some(PoolRef {
                 pool: pool.to_path_buf(),
                 label: slot.file_name()?.to_string_lossy().to_string(),
+                worktree: a.to_path_buf(),
             });
         }
     }
@@ -487,6 +490,7 @@ fn pool_for(dir: &Path) -> Option<PoolRef> {
             return Some(PoolRef {
                 pool: pool.to_path_buf(),
                 label: "main".to_string(),
+                worktree: git_dir.parent()?.to_path_buf(),
             });
         }
     }
@@ -537,13 +541,19 @@ fn treehouse_field(dir: &str) -> String {
         return String::new();
     }
     if r.label == "main" {
-        format!("{LABEL}🏡 main (+{in_use}){RESET}")
+        format!("{LABEL}{}{RESET}", link(&r.worktree, &format!("🏡 main (+{in_use})")))
     } else {
-        format!("{LABEL}🏡 {}/{in_use}{RESET}", r.label)
+        format!("{LABEL}{}{RESET}", link(&r.worktree, &format!("🏡 {}/{in_use}", r.label)))
     }
 }
 
 // ---------- formatting helpers ----------
+
+/// OSC 8 hyperlink to a local path; terminals without support show plain text.
+fn link(path: &Path, text: &str) -> String {
+    let url = path.to_string_lossy().replace('%', "%25").replace(' ', "%20");
+    format!("\x1b]8;;file://{url}\x07{text}\x1b]8;;\x07")
+}
 
 /// Deterministic FNV-1a hash of `id|requestId` for dedup (std's RandomState is
 /// per-process randomized, which would break the persisted seen-set).
